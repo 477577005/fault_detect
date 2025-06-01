@@ -1,0 +1,1429 @@
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 1   
+
+
+C51 COMPILER V9.54, COMPILATION OF MODULE TEST_ROUTINE
+OBJECT MODULE PLACED IN test_routine.OBJ
+COMPILER INVOKED BY: C:\Keil_v5\C51\Bin\c51.exe test_routine.c DB SB OE ROM(LARGE) SMALL OT(6,SPEED) WL(2) RB(0)
+
+line level    source
+
+   1          #include <reg52.h>
+   2          #include <intrins.h>//延时函数头文件
+   3          #include <absacc.h> //绝对地址访问头文件
+   4          #define uchar unsigned char
+   5          #define u8 unsigned char
+   6          #define uint unsigned int
+   7          #define uint16_t unsigned  short int
+   8          #define PCF8563_addr 0XA2
+   9          #define dev24C02_addr 0XA8
+  10          #define ZLG7290_addr 0X70
+  11          
+  12          /*****************端口接线************/
+  13          /*                      ISD1420语音控制         */
+  14          sbit REC =P1^2; sbit PLAYE=P1^3;
+  15          /*                       iic接线      */
+  16          sbit IIC_SCL=P1^1;//SCL
+  17          sbit IIC_SDA=P1^0;//SDA
+  18          /*                              TLC549接线              */
+  19          sbit CLK = P1^2; // 时钟信号
+  20          sbit DATA = P1^3; // 数据输出
+  21          sbit CS = P1^4;  // 片选信号
+  22          /*******                TLC561接线********/
+  23          sbit DIN  = P1^2;  // 数据输入
+  24          sbit SCLK = P1^3;  // 时钟
+  25          //sbit CS   = P1^4;  // 片选 与TLC549共用
+  26          /*******************adc0809**********/
+  27          sbit eoc=P1^2;sbit clk=P1^3;
+  28          /*****************单引脚控制器件接线*****************/
+  29          sbit one_input_class=P1^7;//测试结果
+  30          
+  31          /*****************定义步进电机和38译码器引脚**************/
+  32          sbit A = P1^2;sbit B1 = P1^3;sbit C = P1^4;sbit D = P1^5;
+  33          /****************DS18B20接线**************************/
+  34          sbit DS18B20_PORT=P1^2; //DS18B20数据口定义
+  35          /*********************串并转换和并串转换***************************************/
+  36          // HC165 控制引脚  并入
+  37          sbit HC165_SH_LD =P1^2;//#define HC165_SH_LD P1^2  // 移位/装载控制
+  38          sbit HC165_CLK  = P1^3;  // 时钟
+  39          sbit HC165_DATA  =P1^4;  // 串行数据输入（QH）
+  40          // HC164 控制引脚  并出
+  41          sbit HC164_DATA  =P1^5; // 串行数据输出（A/B）
+  42          sbit HC164_CLK  = P1^6;  // 时钟）
+  43          /***************************************串口函数声明及变量定义*******************/
+  44          bit rx_flag = 0;                 // 接收完成标志
+  45          bit INT0_flag;uchar input_code;uchar key_code1;
+  46          #define BUF_SIZE 4   // 接收缓冲区大小
+  47          void INT0_Init();//P3^2连接ZLG7290的INT(KEY)
+  48          unsigned char rx_buf[BUF_SIZE];  // 接收缓冲区
+  49          unsigned char result_buf[22];  // 接收缓冲区
+  50          unsigned char rx_count = 0;      // 接收数据数
+  51          void UART_Init();
+  52          void UART_SendByte(unsigned char dat);
+  53          void UART_SendString(char *str);
+  54          /*******************************************IIC函数优先声明及变量定义*************/
+  55          /*********数码管译码********/
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 2   
+
+  56          uchar codevalue[10]={0xfc,0x60,0xda,0xf2,0x66,0xb6,0xbe,0xe0,0xfe,0xf6  /*AF*/ };
+  57          void DelayMs(int i);
+  58          void iic_start(void);
+  59          void iic_stop(void);
+  60          void iic_ack(void);
+  61          void iic_nack(void);
+  62          uchar iic_wait_ack(void);
+  63          void iic_write_byte(uchar dat);
+  64          uchar iic_read_byte(uchar ack);
+  65          
+  66          // 多个相似的I2C读写函数可以合并
+  67          void IIC_Write(uchar dev_addr, uchar write_addr, uchar dat);
+  68          uchar IIC_Read(uchar dev_addr,uchar read_addr);
+  69          /***************ZLG7290函数声明**********************/
+  70          void ZLG7290_SetLED(uchar digit, uchar value);
+  71          uchar ZLG7290_ReadKey();
+  72          /*************TLC549函数声明*************/
+  73          void TLC549_Init();             
+  74          uchar TLC549_ReadByte();
+  75          /*************TLC561函数声明*************/
+  76          void TLC5615_Write(uint16_t data1);
+  77          /*****************************串并转换并串转换函数声明***************************/
+  78          unsigned char HC165_ReadByte();
+  79          void HC164_SendByte(unsigned char dat);
+  80          /*****************DS18B20函数声明***********************/
+  81          void delay_10us(int ten_us);
+  82          void delay_ms(int ms);
+  83          void ds18b20_reset(void);
+  84          unsigned char ds18b20_check(void);
+  85          unsigned char ds18b20_read_bit(void);
+  86          unsigned char ds18b20_read_byte(void);
+  87          void ds18b20_write_byte(u8 dat);
+  88          void ds18b20_start(void);
+  89          u8 ds18b20_init(void);
+  90          float ds18b20_read_temperture(void);
+  91          uchar int_to_char(uint16_t dat);
+  92          void smg_anjian();
+  93          /*********************检测器件声明函数**********/
+  94          void test_A2_16_16LED(void);    //用到8255加F5按键 外接8255辅助
+  95          void test_B1_ISD1420(void);             //
+  96          void test_B2_TLC549(void);              //模数  
+  97          void test_B3_DAC0832(void);     //数模：直流电机(高电平)
+  98          void test_B4_ADC0809(void);             //模数  串口
+  99          void test_C2_TLC561(void);              //数模  直流电机
+ 100          void test_D1_stepMotor(void);   //P1^2到P1^5
+ 101          void test_D3_24c02(void);               //串口输出
+ 102          void test_D3_PCF(void);                 //串口显示，键盘检测，PCF时钟   
+ 103          void test_F8_DS18B20(void);             //光耦（低电平）VCC接地
+ 104          void test_smgAnjian(void);
+ 105          void test_8led(void);
+ 106          void test_8Anjian(void);
+ 107          void test_8Kaiguan(void);
+ 108          void test_8led(void);
+ 109          void test_relay(void);
+ 110          void test_photocoupling(void);
+ 111          void test_motor(void);
+ 112          void test_Buzzer(void);
+ 113          void test_hc244_hc273(void);
+ 114          void test_chuanbin(void);
+ 115          void test_138(void);
+ 116          
+ 117          /*     五个模块    */
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 3   
+
+ 118          void test_single_IO_module(void);     //低电平：继电器,蜂鸣器
+ 119          void test_Multi_IO_module(void);//开关八位接JP36，转换出来的jp49接8个LED
+ 120          void test_8255_module(void);
+ 121          void test_iic_module(void);
+ 122          //void test_ADC_DAC_module();
+ 123          void test_AD_module(void);
+ 124          void result_display(void);
+ 125          void show_home_page(void);
+ 126          
+ 127          
+ 128          /****************主函数*******************/
+ 129          void main()
+ 130          {       
+ 131   1              UART_Init();
+ 132   1              input_code=0x11;
+ 133   1              while(1)
+ 134   1               {              
+ 135   2                              switch(input_code) {
+ 136   3                       
+ 137   3                                      case 0x01: test_single_IO_module(); break;      //单IO控制类：继电器、光耦、电机、鸣器、温度传感                        1/
+ 138   3                                      case 0x02: test_Multi_IO_module(); break;       //多IO控制类：串并并串、简单io、138译码、语言控制、步进电机2
+             -/
+ 139   3                                      case 0x03: test_8255_module(); break;           //8255类：8led,8开关，8按键，16*16led                           3/
+ 140   3                                      case 0x04: test_iic_module(); break;            //IIc控制类：24c02、pcf8563、zlg7290                                    4/
+ 141   3                                      case 0x05: test_AD_module(); break;                     //数模转换类 ：TLC549                                                                   5/
+ 142   3                                      case 0x0E: result_display(); break;                     //结果总览
+ 143   3                                      case 0x11: show_home_page(); break;                     //显示主页
+ 144   3                                      default: break;
+ 145   3                              }
+ 146   2                }
+ 147   1      }
+ 148          
+ 149          void show_home_page(void){
+ 150   1              UART_SendString("Its home page  input number begin test\r\n ");
+ 151   1              UART_SendString("1:single_io_module   2:multi_io_module 3:8255_module  \r\n ");
+ 152   1              UART_SendString("4:iic_module   5:adda_module   a:result_display\r\n");input_code=0;
+ 153   1      }
+ 154          /*                                      模块实现            */
+ 155          void test_single_IO_module(void)    //8低电平：共用P1^7（继电器{VCC接地},蜂鸣器）成功继电器通 蜂鸣器响 
+ 156          {
+ 157   1              UART_SendString("test_single_IO_module\r\n ");input_code=0;
+ 158   1              while(input_code != 0x11) {
+ 159   2              switch(input_code) {
+ 160   3                              case 0x00: UART_SendString("input number begin test  1:relay  3:motor 4:buzzer 5:DS18B20 q:quit\r\n  ")
+             -;input_code=0x12;break;
+ 161   3                  case 0x01: test_relay(); break;
+ 162   3                              // case 0x02: test_photocoupling(); break;        //实验箱高偶好像器件都损坏了，一上电就自带上拉电阻了
+ 163   3                              case 0x03: test_motor(); break;
+ 164   3                  case 0x04: test_Buzzer(); break;
+ 165   3                              case 0x05: test_F8_DS18B20(); break;
+ 166   3                              default: break;
+ 167   3              }
+ 168   2          }
+ 169   1      }
+ 170          void test_Multi_IO_module(void) //12开关八位接JP36，转换出来的jp49接8个LED      
+ 171          {
+ 172   1              UART_SendString("test_Multi_IO_module\r\n ");input_code=0;
+ 173   1              while(input_code != 0x11) {
+ 174   2              switch(input_code) {
+ 175   3                              case 0x00: UART_SendString("input 1:hc273_244 2:chuanbin 3:138 4:ISD1420 5:stepMotor q:quit\r\n ");inpu
+             -t_code=0x12;break;
+ 176   3                  case 0x01: test_hc244_hc273(); break;
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 4   
+
+ 177   3                  case 0x02: test_chuanbin(); break;
+ 178   3                              case 0x03: test_138(); break;
+ 179   3                  case 0x04: test_B1_ISD1420(); break;
+ 180   3                              case 0x05: test_D1_stepMotor(); break;
+ 181   3                              default: break;
+ 182   3              }
+ 183   2          }
+ 184   1      }
+ 185          void test_8255_module()
+ 186          {       //uchar i;
+ 187   1              UART_SendString("test_8255_module\r\n ");input_code=0;
+ 188   1              while(input_code != 0x11) {
+ 189   2              switch(input_code) {
+ 190   3                              case 0x00: UART_SendString("input 1:16_16LED 2:8led 3:8Anjian 4:8Kaiguan q:quit\r\n");input_code=0x12;b
+             -reak;
+ 191   3                  case 0x01: test_A2_16_16LED(); break;
+ 192   3                  case 0x02: test_8led(); break;
+ 193   3                              case 0x03: test_8Anjian(); break;
+ 194   3                  case 0x04: test_8Kaiguan(); break;
+ 195   3                              default: break;
+ 196   3              }
+ 197   2          }
+ 198   1      }
+ 199          void test_iic_module(void)        //11
+ 200          {       UART_SendString("test_iic_module\r\n ");input_code=0;
+ 201   1              while(input_code != 0x11) {
+ 202   2              switch(input_code) {
+ 203   3                              case 0x00: UART_SendString("input 1:24c02  2:PCF8563 3:smg_anjian q:quit\r\n ");input_code=0x12;break;
+ 204   3                  case 0x01: test_D3_24c02(); break;
+ 205   3                  case 0x02: test_D3_PCF(); break;
+ 206   3                              case 0x03: test_smgAnjian(); break;
+ 207   3                              default: break;
+ 208   3              }
+ 209   2          }
+ 210   1      }
+ 211          void test_AD_module()
+ 212          {
+ 213   1              UART_SendString("test_AD_module\r\n ");input_code=0;
+ 214   1              while(input_code != 0x11) {
+ 215   2              switch(input_code) {
+ 216   3                              case 0x00: UART_SendString("input 1:TLC549 2:ADC0809 3:TLC561 4:DAC0832 q:quit\r\n ");input_code=0x12;b
+             -reak;
+ 217   3                  case 0x01: test_B2_TLC549(); break;
+ 218   3                  case 0x02: test_B4_ADC0809(); break;
+ 219   3                              case 0x03: test_C2_TLC561(); break;
+ 220   3                  case 0x04: test_B3_DAC0832(); break;
+ 221   3                              default: break;
+ 222   3              }
+ 223   2          }
+ 224   1      }
+ 225          /******************各器件实现********************/
+ 226          void test_relay(void){
+ 227   1              UART_SendString("wiring is as follows:C4_CTRL->P1_7;COM1->VCC; COUT1->F3_test. input:1 begin test\r\n ");
+ 228   1              UART_SendString("if green light is on, then device is ok ;else device bad\r\n ");
+ 229   1              input_code=0;one_input_class=1;
+ 230   1              while(input_code!=0x11){
+ 231   2                      switch(input_code) {
+ 232   3                  case 0x01: input_code=6;UART_SendString("test_relay begin\r\n "); break;
+ 233   3                  case 0x06: one_input_class=0; break;
+ 234   3                              case 0x0F: result_buf[7]='h';input_code=0x11; break;
+ 235   3                  case 0x10: result_buf[7]='n';input_code=0x11; break;
+ 236   3                              default: break;
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 5   
+
+ 237   3              }
+ 238   2              }
+ 239   1              input_code=0;
+ 240   1      }
+ 241          /*
+ 242          void test_photocoupling(void){
+ 243                  UART_SendString("test_photocoupling input:2     D4_SIN1->P1_7  SOUT1->F3_test\r\n ");
+ 244                  input_code=0;one_input_class=0;
+ 245                  while(input_code!=0x11){
+ 246                          switch(input_code) {
+ 247                      case 0x02: input_code=6;UART_SendString("test_photocoupling begin\r\n "); break;
+ 248                      case 0x06: one_input_class=1; break;
+ 249                                  case 0x0F: result_buf[15]='h';input_code=0x11; break;
+ 250                      case 0x10: result_buf[15]='n';input_code=0x11; break;
+ 251                                  default: break;
+ 252                  }
+ 253                  }
+ 254                  input_code=0;
+ 255          }*/
+ 256          void test_motor(void){
+ 257   1              UART_SendString("test_motor input:3     C4_CTRL->P1_7 COM1->VCC COUT1->E1_CTRL\r\n ");one_input_class=1;input
+             -_code=0;
+ 258   1              while(input_code!=0x11){
+ 259   2                      switch(input_code) {
+ 260   3                  case 0x03: input_code=6;UART_SendString("test_motor begin\r\n "); break;
+ 261   3                  case 0x06: one_input_class=0; break;
+ 262   3                              case 0x0F: result_buf[16]='h';input_code=0x11; break;
+ 263   3                  case 0x10: result_buf[16]='n';input_code=0x11; break;
+ 264   3                              default: break;
+ 265   3              }
+ 266   2              }
+ 267   1              input_code=0;
+ 268   1      }
+ 269          void test_Buzzer(void){
+ 270   1              UART_SendString("test_buzzer input:4  F6_Ctrl->P1_7\r\n ");one_input_class=1;input_code=0;
+ 271   1              while(input_code!=0x11){
+ 272   2                      switch(input_code) {
+ 273   3                  case 0x04: input_code=6;UART_SendString("test_Buzzer begin\r\n "); break;
+ 274   3                  case 0x06: one_input_class=0; break;
+ 275   3                              case 0x0F: result_buf[17]='h';input_code=0x11; break;
+ 276   3                  case 0x10: result_buf[17]='n';input_code=0x11; break;
+ 277   3                              default: break;
+ 278   3              }
+ 279   2              }
+ 280   1              input_code=0;one_input_class=1;
+ 281   1      }
+ 282          
+ 283          void test_hc244_hc273(void){
+ 284   1              uchar i;
+ 285   1              UART_SendString("test_273and244 input:1\r\n ");
+ 286   1              UART_SendString("CS_273->GND CS_244->GND JP66->F5_JP65 JP104->F5_JP80\r\n ");input_code=0;
+ 287   1              while(input_code!=0x11){
+ 288   2                      switch(input_code) {
+ 289   3                  case 0x01: input_code=6;UART_SendString("test_hc244_hc273 begin\r\n "); break;
+ 290   3                  case 0x06: i=XBYTE[0xffff];XBYTE[0xffff]=i;         break;
+ 291   3                              case 0x0F: result_buf[13]='h';input_code=0x11; break;
+ 292   3                  case 0x10: result_buf[13]='n';input_code=0x11; break;
+ 293   3                              default: break;
+ 294   3              }
+ 295   2              }
+ 296   1      
+ 297   1              input_code=0;
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 6   
+
+ 298   1      }
+ 299          void test_chuanbin(void){
+ 300   1              uchar data8;
+ 301   1              UART_SendString("test_chuanbin input:2\r\n ");
+ 302   1              UART_SendString("SH_LD->P1_2 CLK->P1_3 QH->P1_4  JP36->F5_JP80\r\n ");
+ 303   1              UART_SendString("A/B->P1_5 CLK->P1_6  JP49->F5_JP65\r\n ");input_code=0;
+ 304   1              while(input_code!=0x11){
+ 305   2                      switch(input_code) {
+ 306   3                  case 0x02: input_code=6;UART_SendString("test_chuanbin begin\r\n "); break;
+ 307   3                  case 0x06: data8=HC165_ReadByte();  // 从HC165读取数据
+ 308   3                                                 HC164_SendByte(data8);   // 发送到HC164
+ 309   3                                         DelayMs(100);        break;
+ 310   3                              case 0x0F: result_buf[11]='h';input_code=0x11; break;
+ 311   3                  case 0x10: result_buf[11]='n';input_code=0x11; break;
+ 312   3                              default: break;
+ 313   3              }
+ 314   2              }
+ 315   1              input_code=0;
+ 316   1      }
+ 317          void test_138(void){
+ 318   1              UART_SendString("test_138 input:3\r\n ");
+ 319   1              UART_SendString("A->P1_2 B->P1_3 C->P1_4 G1->VCC G2A/G2B->GND JP35->F5_JP65\r\n ");input_code=0;
+ 320   1              while(input_code!=0x11){
+ 321   2                      switch(input_code) {
+ 322   3                  case 0x03: input_code=6;UART_SendString("test_138 begin\r\n "); break;
+ 323   3                  case 0x06:  A=B1=C=0;DelayMs(500);A=B1=C=1;DelayMs(500);    
+ 324   3                                                      A=0;B1=0;C=1;DelayMs(500);A=0;B1=1;C=0;DelayMs(500);A=0;B1=1;C=1;DelayMs(500);
+ 325   3                                                      A=1;B1=0;C=0;DelayMs(500);A=1;B1=0;C=1;DelayMs(500);A=1;B1=1;C=0;DelayMs(500);  break;
+ 326   3                              case 0x0F: result_buf[14]='h';input_code=0x11; break;
+ 327   3                  case 0x10: result_buf[14]='n';input_code=0x11; break;
+ 328   3                              default: break;
+ 329   3              }
+ 330   2              }
+ 331   1              input_code=0;
+ 332   1      }
+ 333          
+ 334          
+ 335          void test_8led(void){
+ 336   1              //uchar i;
+ 337   1              input_code=0;
+ 338   1              UART_SendString("test_8led input:2  F5_JP65->B6_JP56\r\n ");
+ 339   1              XBYTE[0xf003]=0x80;//
+ 340   1              while(input_code!=0x11){
+ 341   2                      switch(input_code) {
+ 342   3                  case 0x02: input_code=6;UART_SendString("test_8led begin\r\n "); break;
+ 343   3                  case 0x06:  XBYTE[0xf000]=0xAA;DelayMs(500);XBYTE[0xf000]=0x55;DelayMs(500);        break;
+ 344   3                              case 0x0F: result_buf[19]='h';input_code=0x11; break;
+ 345   3                  case 0x10: result_buf[19]='n';input_code=0x11; break;
+ 346   3                              default: break;
+ 347   3              }
+ 348   2              }
+ 349   1                      
+ 350   1                              input_code=0;
+ 351   1      }
+ 352          void test_8Anjian(void){
+ 353   1              uchar i;
+ 354   1              input_code=0;
+ 355   1              UART_SendString("test_8Anjian input:3 F5_JP74->B6_JP53 F5_JP65->B6_JP56 \r\n ");
+ 356   1              XBYTE[0xf003]=0x82;//PB输入，PA输出
+ 357   1              while(input_code!=0x11){
+ 358   2                      switch(input_code) {
+ 359   3                  case 0x03: input_code=6;UART_SendString("test_8Anjian begin\r\n "); break;
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 7   
+
+ 360   3                  case 0x06: i=XBYTE[0xf001];XBYTE[0xf000]=i; break;
+ 361   3                              case 0x0F: result_buf[20]='h';input_code=0x11; break;
+ 362   3                  case 0x10: result_buf[20]='n';input_code=0x11; break;
+ 363   3                              default: break;
+ 364   3              }
+ 365   2              }
+ 366   1              
+ 367   1              input_code=0;
+ 368   1      }
+ 369          void test_8Kaiguan(void){
+ 370   1              uchar i;
+ 371   1              input_code=0;
+ 372   1              XBYTE[0xf003]=0x82;//PB输入，PA输出
+ 373   1              UART_SendString("test_8Kaiguan input:4 F5_JP80->B6_JP53 F5_JP65->B6_JP56 \r\n ");
+ 374   1              while(input_code!=0x11){
+ 375   2                      switch(input_code) {
+ 376   3                  case 0x04: input_code=6;UART_SendString("test_8Kaiguan begin\r\n "); break;
+ 377   3                  case 0x06: i=XBYTE[0xf001];XBYTE[0xf000]=i; break;
+ 378   3                              case 0x0F: result_buf[21]='h';input_code=0x11; break;
+ 379   3                  case 0x10: result_buf[21]='n';input_code=0x11; break;
+ 380   3                              default: break;
+ 381   3              }
+ 382   2              }
+ 383   1                      
+ 384   1              input_code=0;
+ 385   1      }
+ 386          
+ 387          
+ 388          void test_smgAnjian(void)               //10
+ 389          {
+ 390   1              INT0_Init();
+ 391   1              UART_SendString("test_smgAnjian input:3 D3_B->F4_B D3_C->F4_C SCL->P1_1 SDA->P1_0\r\n ");input_code=0;
+ 392   1              while(input_code!=0x11){
+ 393   2                      switch(input_code) {
+ 394   3                  case 0x03: input_code=6;UART_SendString("test_smgAnjian begin\r\n "); break;
+ 395   3                  case 0x06: smg_anjian();    break;
+ 396   3                              case 0x0F: result_buf[18]='h';input_code=0x11; break;
+ 397   3                  case 0x10: result_buf[18]='n';input_code=0x11; break;
+ 398   3                              default: break;
+ 399   3              }
+ 400   2              }
+ 401   1      
+ 402   1              IT0 = 0;    // 下降沿触发
+ 403   1          EX0 = 0;    // 使能INT0中断
+ 404   1              input_code=0;
+ 405   1      }
+ 406          
+ 407          void test_A2_16_16LED(void)     // B接jp23、24  高电平点亮
+ 408          {
+ 409   1              UART_SendString("test_A2_16_16LED input:1       B6:A0->A0 A1->A1\r\n ");
+ 410   1              UART_SendString("JP22->B6_B JP24->B6_C  CS->CS1\r\n ");input_code=0;
+ 411   1              XBYTE[0xf003]=0x80;  //PA输出 PB输入
+ 412   1              XBYTE[0xf000]=0x00;
+ 413   1              XBYTE[0xf001]=0x00;
+ 414   1                      while(input_code!=0x11){
+ 415   2                      switch(input_code) {
+ 416   3                  case 0x01: input_code=6;UART_SendString("test_A2_16_16LED begin\r\n "); break;
+ 417   3                  case 0x06:  XBYTE[0xf000]=0x01;DelayMs(500);XBYTE[0xf000]=0x02;DelayMs(500);
+ 418   3                                                      XBYTE[0xf000]=0x04;DelayMs(500);XBYTE[0xf000]=0x08;DelayMs(500);
+ 419   3                                                      XBYTE[0xf000]=0x10;DelayMs(500);XBYTE[0xf000]=0x20;DelayMs(500);
+ 420   3                                                      XBYTE[0xf000]=0x40;DelayMs(500);XBYTE[0xf000]=0x80;DelayMs(500);        break;
+ 421   3                              case 0x0F: result_buf[1]='h';input_code=0x11; break;
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 8   
+
+ 422   3                  case 0x10: result_buf[1]='n';input_code=0x11; break;
+ 423   3                              default: break;
+ 424   3              }
+ 425   2              }
+ 426   1      
+ 427   1              input_code=0;
+ 428   1      }
+ 429          
+ 430          void test_B1_ISD1420(void)      //6     
+ 431          {       REC=1;
+ 432   1              UART_SendString("test_B1_ISD1420 input:4        REC->P1_2 PLAYE->P1_3\r\n ");input_code=0;
+ 433   1              PLAYE=1;REC=1; //DelayMs(1000);
+ 434   1                      while(input_code!=0x11){
+ 435   2                      switch(input_code) {
+ 436   3                  case 0x04: input_code=6;UART_SendString("test_ISD1420 begin\r\n ");REC=0; break;
+ 437   3                  case 0x06: PLAYE=1;DelayMs(2000);REC=1;PLAYE=0;     break;
+ 438   3                              case 0x0F: result_buf[2]='h';input_code=0x11; break;
+ 439   3                  case 0x10: result_buf[2]='n';input_code=0x11; break;
+ 440   3                              default: break;
+ 441   3              }
+ 442   2              }
+ 443   1              
+ 444   1              input_code=0;
+ 445   1      }
+ 446          void test_B2_TLC549(void)       //1     
+ 447          {       uchar adc_value;
+ 448   1              UART_SendString("test_B2_TLC549 input:1\r\n ");
+ 449   1              UART_SendString("CLK->P1_2 DATA->P1_3 CS->P1_4 AIN->F1\r\n ");input_code=0;
+ 450   1              TLC549_Init();  // 初始化TLC549
+ 451   1              while(input_code!=0x11){
+ 452   2                      switch(input_code) {
+ 453   3                  case 0x01: input_code=6;UART_SendString("test_TLC549 begin\r\n "); break;
+ 454   3                  case 0x06:  adc_value = TLC549_ReadByte();  // 读取ADC值
+ 455   3                                                      adc_value=(adc_value*5)/255;
+ 456   3                                                      UART_SendByte((int_to_char(adc_value)));UART_SendString("\r\n");adc_value=0;
+ 457   3                                                      DelayMs(1000);  break;
+ 458   3                              case 0x0F: result_buf[3]='h';input_code=0x11; break;
+ 459   3                  case 0x10: result_buf[3]='n';input_code=0x11; break;
+ 460   3                              default: break;
+ 461   3              }
+ 462   2              }
+ 463   1      
+ 464   1              input_code=0;
+ 465   1      }
+ 466          void test_B3_DAC0832(void)      //4     
+ 467          {
+ 468   1              UART_SendString("test_B3_DAC0832 input:4 CS->CS1  OUT->E1_CTRL\r\n ");
+ 469   1              input_code=0;
+ 470   1              while(input_code!=0x11){
+ 471   2                      switch(input_code) {
+ 472   3                  case 0x04: input_code=6;UART_SendString("test_DAC0832 begin\r\n "); break;
+ 473   3                  case 0x06:  XBYTE[0xFF00]=0;
+ 474   3                                                      DelayMs(500);
+ 475   3                                                      XBYTE[0xFF00]=0xFF;
+ 476   3                                                      DelayMs(500);   break;
+ 477   3                              case 0x0F: result_buf[4]='h';input_code=0x11; break;
+ 478   3                  case 0x10: result_buf[4]='n';input_code=0x11; break;
+ 479   3                              default: break;
+ 480   3              }
+ 481   2              }
+ 482   1      
+ 483   1              input_code=0;
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 9   
+
+ 484   1      }
+ 485          void test_B4_ADC0809(void)      //2  用了定时器
+ 486          {       
+ 487   1              uint16_t getdata;unsigned short int i=0;
+ 488   1              ET0=1;
+ 489   1              EA=1;
+ 490   1              TMOD |=0x02;
+ 491   1              TH0=246;
+ 492   1              TL0=246;
+ 493   1              TR0=1;
+ 494   1              UART_SendString("test_B4_ADC0809 input:2\r\n ");input_code=0;
+ 495   1              UART_SendString("EOC->P1_2 CLK->P1_3 CS->CS1 ADDA~C->GND INT0->F1\r\n ");
+ 496   1              while(input_code!=0x11){
+ 497   2                      switch(input_code) {
+ 498   3                  case 0x02: input_code=6;UART_SendString("test_ADC0809 begin\r\n "); break;
+ 499   3                  case 0x06:  XBYTE[0X8000]=0;
+ 500   3                                                      while(eoc==0){ i++;if(i>30000){i=0;break;} ;}
+ 501   3                                                      getdata=XBYTE[0X8000];
+ 502   3                                                      getdata=(getdata*5)/255;
+ 503   3                                                      UART_SendByte((int_to_char(getdata)));UART_SendString("\r\n");DelayMs(500);getdata=0;break;
+ 504   3                              case 0x0F: result_buf[5]='h';input_code=0x11; break;
+ 505   3                  case 0x10: result_buf[5]='n';input_code=0x11; break;
+ 506   3                              default: break;
+ 507   3              }
+ 508   2              }
+ 509   1      
+ 510   1              TR0=0;input_code=0;
+ 511   1      }
+ 512          void test_C2_TLC561(void)       //3             用到直流电机
+ 513          {
+ 514   1              UART_SendString("test_C2_TLC561 input:3\r\n ");
+ 515   1              UART_SendString("DIN->P1_2 SCLK->P1_3 CS->P1_4 OUT->E1_CTRL\r\n ");input_code=0;
+ 516   1              while(input_code!=0x11){
+ 517   2                      switch(input_code) {
+ 518   3                  case 0x03: input_code=6;UART_SendString("test_TLC561 begin\r\n "); break;
+ 519   3                  case 0x06:  TLC5615_Write(10);
+ 520   3                                                      DelayMs(1000);
+ 521   3                                                      //TLC5615_Write(100);// 
+ 522   3                                                      TLC5615_Write(7774);// 1111 1111 1100  高10位全为1
+ 523   3                                                      DelayMs(1000);  break;
+ 524   3                              case 0x0F: result_buf[6]='h';input_code=0x11; break;
+ 525   3                  case 0x10: result_buf[6]='n';input_code=0x11; break;
+ 526   3                              default: break;
+ 527   3              }
+ 528   2              }
+ 529   1      
+ 530   1              input_code=0;
+ 531   1      }
+ 532          
+ 533          void test_D1_stepMotor(void)    //7
+ 534          {
+ 535   1              UART_SendString("test_D1_stepMotor input:5      A->P1_2 B->P1_3 C->P1_4 D->P1_5\r\n ");
+ 536   1              input_code=0;
+ 537   1              while(input_code!=0x11){
+ 538   2                      switch(input_code) {
+ 539   3                  case 0x05: input_code=6;UART_SendString("test_stepMotor begin\r\n "); break;
+ 540   3                  case 0x06:  A = 1; B1 = 0; C = 0; D = 0; DelayMs(100);
+ 541   3                                                      A = 0; B1 = 1; C = 0; D = 0; DelayMs(100);
+ 542   3                                                      A = 0; B1 = 0; C = 1; D = 0; DelayMs(100);
+ 543   3                                                      A = 0; B1 = 0; C = 0; D = 1; DelayMs(100);      break;
+ 544   3                              case 0x0F: result_buf[8]='h';input_code=0x11; break;
+ 545   3                  case 0x10: result_buf[8]='n';input_code=0x11; break;
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 10  
+
+ 546   3                              default: break;
+ 547   3              }
+ 548   2              }
+ 549   1      
+ 550   1              input_code=0;
+ 551   1      }
+ 552          void test_D3_24c02(void)        //1
+ 553          {
+ 554   1              
+ 555   1              UART_SendString("test_D3_24c02 input:1  SCL->P1_1 SDA->P1_0\r\n ");
+ 556   1              //IIC24c02_write_one_byte(10,22);
+ 557   1              IIC_Write(dev24C02_addr,10,22);
+ 558   1              input_code=0;
+ 559   1              while(input_code!=0x11){
+ 560   2                      switch(input_code) {
+ 561   3                  case 0x01: input_code=6;UART_SendString("test_24c02 begin\r\n "); break;
+ 562   3                  case 0x06:  if(IIC_Read(dev24C02_addr,10) == 22 )   UART_SendString("24c02 good\r\n ");
+ 563   3                                                      else                                                                    UART_SendString("24c02 error\r\n ");
+ 564   3                                                      DelayMs(1000);  break;
+ 565   3                              case 0x0F: result_buf[9]='h';input_code=0x11; break;
+ 566   3                  case 0x10: result_buf[9]='n';input_code=0x11; break;
+ 567   3                              default: break;
+ 568   3              }
+ 569   2              }
+ 570   1      
+ 571   1              input_code=0;
+ 572   1      }
+ 573          void test_D3_PCF(void)  //2     用到8255和LED辅助测试 和TLC549一样借助8255
+ 574          {
+ 575   1              uchar i;input_code=0;
+ 576   1              UART_SendString("test_D3_PCF input:2  SCL->P1_1 SDA->P1_0\r\n ");
+ 577   1              while(input_code!=0x11){
+ 578   2                      switch(input_code) {
+ 579   3                  case 0x02: input_code=6;UART_SendString("test_PCF begin\r\n "); break;
+ 580   3                  case 0x06:  i=IIC_Read(PCF8563_addr,0X02);
+ 581   3                                                      i=(( (i >> 4)*10)+(i&0x0F)); //BCD转十进制
+ 582   3                                                      //XBYTE[0xf000]=PCF_read_one_byte(0X02);
+ 583   3                                                      UART_SendByte((int_to_char(i/10)));
+ 584   3                                                      UART_SendByte(int_to_char(i%10));UART_SendString("\r\n");
+ 585   3                                                      DelayMs(1000);i=0;      break;
+ 586   3                              case 0x0F: result_buf[10]='h';input_code=0x11; break;
+ 587   3                  case 0x10: result_buf[10]='n';input_code=0x11; break;
+ 588   3                              default: break;
+ 589   3              }
+ 590   2              }
+ 591   1      
+ 592   1              input_code=0;
+ 593   1      }
+ 594          
+ 595          
+ 596          void test_F8_DS18B20(void)              //8    
+ 597          {       uint16_t value_temp;
+ 598   1              UART_SendString("test_F8_DS18B20 input:5  TOUT->P1_2\r\n ");
+ 599   1              ds18b20_init();input_code=0;
+ 600   1              while(input_code!=0x11){
+ 601   2                      switch(input_code) {
+ 602   3                  case 0x05: input_code=6;UART_SendString("test_DS18B20 begin\r\n "); break;
+ 603   3                  case 0x06:  value_temp=ds18b20_read_temperture();
+ 604   3                                                      UART_SendByte((int_to_char(value_temp/10)));
+ 605   3                                                      UART_SendByte(int_to_char((value_temp%10)));UART_SendString("\r\n");
+ 606   3                                                      DelayMs(500);   break;
+ 607   3                              case 0x0F: result_buf[12]='h';input_code=0x11; break;
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 11  
+
+ 608   3                  case 0x10: result_buf[12]='n';input_code=0x11; break;
+ 609   3                              default: break;
+ 610   3              }
+ 611   2              }
+ 612   1      
+ 613   1              input_code=0;
+ 614   1      }
+ 615          void result_display(void)               //14
+ 616          {
+ 617   1              UART_SendString("result_display\r\n ");
+ 618   1              //UART_SendString("lcd12864:"); UART_SendByte(result_buf[0]);
+ 619   1              UART_SendString("relay:");      UART_SendByte(result_buf[7]);
+ 620   1              //UART_SendString("     photocoupling:");       UART_SendByte(result_buf[15]);
+ 621   1              UART_SendString("       motor:");       UART_SendByte(result_buf[16]);
+ 622   1              UART_SendString("       buzzer:");      UART_SendByte(result_buf[17]);
+ 623   1              UART_SendString("       DS18B20:");     UART_SendByte(result_buf[12]);
+ 624   1              UART_SendString("\r\n ");
+ 625   1              UART_SendString("HC273_hc244:");        UART_SendByte(result_buf[13]);
+ 626   1              UART_SendString("       chuanbin:");    UART_SendByte(result_buf[11]);
+ 627   1              UART_SendString("       138:"); UART_SendByte(result_buf[14]);
+ 628   1              UART_SendString("       ISD1420:");     UART_SendByte(result_buf[2]);
+ 629   1              UART_SendString("       stepMotor:");UART_SendByte(result_buf[8]);
+ 630   1              UART_SendString("\r\n ");
+ 631   1              UART_SendString("16_16LED:");   UART_SendByte(result_buf[1]);
+ 632   1              UART_SendString("       8led:");        UART_SendByte(result_buf[19]);
+ 633   1              UART_SendString("       8Anjian:");     UART_SendByte(result_buf[20]);
+ 634   1              UART_SendString("       8Kaiguan:");    UART_SendByte(result_buf[21]);
+ 635   1              UART_SendString("\r\n ");
+ 636   1              UART_SendString("24c02:");      UART_SendByte(result_buf[9]);
+ 637   1              UART_SendString("       PCF:");         UART_SendByte(result_buf[10]);
+ 638   1              UART_SendString("       smgAnjian:");           UART_SendByte(result_buf[18]);
+ 639   1              UART_SendString("\r\n ");
+ 640   1              UART_SendString("TLC549:");     UART_SendByte(result_buf[3]);
+ 641   1              UART_SendString("       ADC0809:");     UART_SendByte(result_buf[5]);
+ 642   1              UART_SendString("       TLC561:");      UART_SendByte(result_buf[6]);
+ 643   1              UART_SendString("       DAC0832:");     UART_SendByte(result_buf[4]);
+ 644   1              UART_SendString("\r\n ");
+ 645   1              input_code=0x11;UART_SendString("\r\n ");
+ 646   1              //UART_SendString("Its home page\r\n ");
+ 647   1      }
+ 648          
+ 649          /******************************************TLC549函数实现**********************************/
+ 650          // 初始化TLC549
+ 651          void TLC549_Init() {
+ 652   1              CS = 1;  // 片选信号置高
+ 653   1              CLK = 0; // 时钟信号置低
+ 654   1      }
+ 655          // 从TLC549读取一个字节
+ 656          uchar TLC549_ReadByte() {
+ 657   1              uchar i, dat = 0;
+ 658   1              CS = 0;  // 片选信号置低，启动转换
+ 659   1              for (i = 0; i < 8; i++) {
+ 660   2                      dat <<= 1;          // 左移一位
+ 661   2                      CLK = 1;           // 时钟信号置高
+ 662   2                      if (DATA) dat |= 1; // 读取数据位
+ 663   2                      CLK = 0;           // 时钟信号置低
+ 664   2              }
+ 665   1               CS = 1;  // 片选信号置高，结束转换
+ 666   1              return dat;
+ 667   1      }
+ 668          /*************DAC0809实现  定时中断函数********************/
+ 669          void T0x(void ) interrupt 1 using 0        
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 12  
+
+ 670                  {
+ 671   1                      clk=~clk;       
+ 672   1              }
+ 673          /******************     TLC561函数实现          ****************/
+ 674          void TLC5615_Write(uint16_t data1) {
+ 675   1          uchar i;
+ 676   1          CS = 0;          // 使能芯片
+ 677   1          
+ 678   1          // TLC5615需要12bit数据（10bit数据 + 2bit填充）
+ 679   1          data1 <<= 2;      // 左移2位补零
+ 680   1          
+ 681   1          for(i=0; i<12; i++) {
+ 682   2              SCLK = 0;
+ 683   2              DIN = (data1 & 0x800) ? 1 : 0;  // 取最高位
+ 684   2              data1 <<= 1;
+ 685   2              SCLK = 1;     // 上升沿发送数据
+ 686   2              _nop_();      // 短暂延时
+ 687   2          }
+ 688   1          SCLK = 0;
+ 689   1          CS = 1;           // 禁用芯片
+ 690   1      }
+ 691          /**********************************************串并并串转 *****************************************/
+ 692          // 从HC165读取1字节（并行→串行）
+ 693          unsigned char HC165_ReadByte() {
+ 694   1          unsigned char i;
+ 695   1              unsigned char dat = 0;
+ 696   1          HC165_SH_LD=0;//HC165_SH_LD = 0; // 装载并行数据（低电平有效）
+ 697   1          _nop_();          // 短暂延时（确保稳定）
+ 698   1          HC165_SH_LD = 1;  // 开始移位（高电平）
+ 699   1          
+ 700   1          for (i = 0; i < 8; i++) {
+ 701   2              dat <<= 1;            // 左移1位（MSB First）
+ 702   2              if (HC165_DATA) dat |=0x01;  // 读取数据位
+ 703   2              
+ 704   2              HC165_CLK = 0;  // 时钟下降沿（准备）
+ 705   2              _nop_();
+ 706   2              HC165_CLK = 1;  // 时钟上升沿（移位）
+ 707   2              _nop_();
+ 708   2          }
+ 709   1          return dat;
+ 710   1      }
+ 711          // 向HC164发送1字节（串行→并行）
+ 712          void HC164_SendByte(unsigned char dat) {
+ 713   1          unsigned char i;
+ 714   1          for (i = 0; i < 8; i++) {
+ 715   2              HC164_DATA = (dat >> (7 - i)) & 0x01;  // 从高位到低位发送
+ 716   2              HC164_CLK = 0;  // 时钟下降沿（准备）
+ 717   2              _nop_();
+ 718   2              HC164_CLK = 1;  // 时钟上升沿（锁存）
+ 719   2              _nop_();
+ 720   2          }
+ 721   1      }
+ 722          /****************************************延时函数实现*******************************************/
+ 723          void delay_10us(int ten_us)
+ 724          {
+ 725   1              while(ten_us--);        
+ 726   1      }
+ 727          void DelayMs(int i)
+ 728          {
+ 729   1              
+ 730   1              for(i;i>0;i--)
+ 731   1              {
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 13  
+
+ 732   2                      unsigned char ii, j;
+ 733   2                      _nop_();
+ 734   2                      ii = 2;
+ 735   2                      j = 199;
+ 736   2                      do
+ 737   2                      {
+ 738   3                              while (--j);
+ 739   3                      } while (--ii);
+ 740   2              }
+ 741   1      }
+ 742          /*******************************************************************************
+ 743          * 函 数 名         : ds18b20_reset
+ 744          * 函数功能                 : 复位DS18B20  
+ 745          * 输    入         : 无
+ 746          * 输    出         : 无
+ 747          *******************************************************************************/
+ 748          void ds18b20_reset(void)
+ 749          {
+ 750   1              DS18B20_PORT=0; //拉低DQ
+ 751   1              delay_10us(75); //拉低750us
+ 752   1              DS18B20_PORT=1; //DQ=1
+ 753   1              delay_10us(2);  //20US
+ 754   1      }
+ 755          /*******************************************************************************
+ 756          * 函 数 名         : ds18b20_check
+ 757          * 函数功能                 : 检测DS18B20是否存在
+ 758          * 输    入         : 无
+ 759          * 输    出         : 1:未检测到DS18B20的存在，0:存在
+ 760          *******************************************************************************/
+ 761          unsigned char ds18b20_check(void)
+ 762          {
+ 763   1              unsigned char time_temp=0;
+ 764   1      
+ 765   1              while(DS18B20_PORT&&time_temp<20)       //等待DQ为低电平
+ 766   1              {
+ 767   2                      time_temp++;
+ 768   2                      delay_10us(1);  
+ 769   2              }
+ 770   1              if(time_temp>=20)return 1;      //如果超时则强制返回1
+ 771   1              else time_temp=0;
+ 772   1              while((!DS18B20_PORT)&&time_temp<20)    //等待DQ为高电平
+ 773   1              {
+ 774   2                      time_temp++;
+ 775   2                      delay_10us(1);
+ 776   2              }
+ 777   1              if(time_temp>=20)return 1;      //如果超时则强制返回1
+ 778   1              return 0;
+ 779   1      }
+ 780          
+ 781          /*******************************************************************************
+ 782          * 函 数 名         : ds18b20_read_bit
+ 783          * 函数功能                 : 从DS18B20读取一个位
+ 784          * 输    入         : 无
+ 785          * 输    出         : 1/0
+ 786          *******************************************************************************/
+ 787          unsigned char ds18b20_read_bit(void)
+ 788          {
+ 789   1              unsigned char dat=0;
+ 790   1              
+ 791   1              DS18B20_PORT=0;
+ 792   1              _nop_();_nop_();
+ 793   1              DS18B20_PORT=1; 
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 14  
+
+ 794   1              _nop_();_nop_(); //该段时间不能过长，必须在15us内读取数据
+ 795   1              if(DS18B20_PORT)dat=1;  //如果总线上为1则数据dat为1，否则为0
+ 796   1              else dat=0;
+ 797   1              delay_10us(5);
+ 798   1              return dat;
+ 799   1      } 
+ 800          
+ 801          /*******************************************************************************
+ 802          * 函 数 名         : ds18b20_read_byte
+ 803          * 函数功能                 : 从DS18B20读取一个字节
+ 804          * 输    入         : 无
+ 805          * 输    出         : 一个字节数据
+ 806          *******************************************************************************/
+ 807          unsigned char ds18b20_read_byte(void)
+ 808          {
+ 809   1              unsigned char i=0;
+ 810   1              u8 dat=0;
+ 811   1              u8 temp=0;
+ 812   1      
+ 813   1              for(i=0;i<8;i++)//循环8次，每次读取一位，且先读低位再读高位
+ 814   1              {
+ 815   2                      temp=ds18b20_read_bit();
+ 816   2                      dat=(temp<<7)|(dat>>1);
+ 817   2              }
+ 818   1              return dat;     
+ 819   1      }
+ 820          /*******************************************************************************
+ 821          * 函 数 名         : ds18b20_write_byte
+ 822          * 函数功能                 : 写一个字节到DS18B20
+ 823          * 输    入         : dat：要写入的字节
+ 824          * 输    出         : 无
+ 825          *******************************************************************************/
+ 826          void ds18b20_write_byte(u8 dat)
+ 827          {
+ 828   1              u8 i=0;
+ 829   1              u8 temp=0;
+ 830   1              for(i=0;i<8;i++)//循环8次，每次写一位，且先写低位再写高位
+ 831   1              {
+ 832   2                      temp=dat&0x01;//选择低位准备写入
+ 833   2                      dat>>=1;//将次高位移到低位
+ 834   2                      if(temp){
+ 835   3                              DS18B20_PORT=0;
+ 836   3                              _nop_();_nop_();
+ 837   3                              DS18B20_PORT=1; 
+ 838   3                              delay_10us(6);
+ 839   3                      }
+ 840   2                      else{
+ 841   3                              DS18B20_PORT=0;
+ 842   3                              delay_10us(6);
+ 843   3                              DS18B20_PORT=1;
+ 844   3                              _nop_();_nop_();        
+ 845   3                      }       
+ 846   2              }       
+ 847   1      }
+ 848          
+ 849          /*******************************************************************************
+ 850          * 函 数 名         : ds18b20_start
+ 851          * 函数功能                 : 开始温度转换
+ 852          * 输    入         : 无
+ 853          * 输    出         : 无
+ 854          *******************************************************************************/
+ 855          void ds18b20_start(void)
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 15  
+
+ 856          {
+ 857   1              ds18b20_reset();//复位
+ 858   1              ds18b20_check();//检查DS18B20
+ 859   1              ds18b20_write_byte(0xcc);//SKIP ROM
+ 860   1          ds18b20_write_byte(0x44);//转换命令 
+ 861   1      }
+ 862          
+ 863          /*******************************************************************************
+ 864          * 函 数 名         : ds18b20_init
+ 865          * 函数功能                 : 初始化DS18B20的IO口 DQ 同时检测DS的存在
+ 866          * 输    入         : 无
+ 867          * 输    出         : 1:不存在，0:存在
+ 868          *******************************************************************************/ 
+ 869          u8 ds18b20_init(void)
+ 870          {
+ 871   1              ds18b20_reset();
+ 872   1              return ds18b20_check(); 
+ 873   1      }
+ 874          
+ 875          /*******************************************************************************
+ 876          * 函 数 名         : ds18b20_read_temperture
+ 877          * 函数功能                 : 从ds18b20得到温度值
+ 878          * 输    入         : 无
+ 879          * 输    出         : 温度数据
+ 880          *******************************************************************************/
+ 881          float ds18b20_read_temperture(void)
+ 882          {
+ 883   1              float temp;
+ 884   1              u8 dath=0;
+ 885   1              u8 datl=0;
+ 886   1              uint16_t value=0;
+ 887   1              
+ 888   1              ds18b20_start();//开始转换
+ 889   1              ds18b20_reset();//复位
+ 890   1              ds18b20_check();
+ 891   1              ds18b20_write_byte(0xcc);//SKIP ROM
+ 892   1          ds18b20_write_byte(0xbe);//读存储器
+ 893   1      
+ 894   1              datl=ds18b20_read_byte();//低字节
+ 895   1              dath=ds18b20_read_byte();//高字节
+ 896   1              value=(dath<<8)+datl;//合并为16位数据
+ 897   1      
+ 898   1              if((value&0xf800)==0xf800)//判断符号位，负温度
+ 899   1              {
+ 900   2                      value=(~value)+1; //数据取反再加1
+ 901   2                      temp=value*(-0.0625);//乘以精度 
+ 902   2              }
+ 903   1              else //正温度
+ 904   1              {
+ 905   2                      temp=value*0.0625;      
+ 906   2              }
+ 907   1              return temp;
+ 908   1              //return dath;
+ 909   1      }
+ 910          
+ 911          
+ 912          /**********************************************串口的实现*********************/
+ 913          /**********************************************************************/
+ 914          
+ 915          void UART_Init() {
+ 916   1          SCON = 0x50;        // 模式1（8位UART），允许接收（REN=1）
+ 917   1          TMOD |= 0x20;       // 定时器1模式2（8位自动重装）
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 16  
+
+ 918   1          TH1 = 0xFD;         // 波特率9600（12MHz晶振）
+ 919   1          TL1 = 0xFD;
+ 920   1          TR1 = 1;            // 启动定时器1
+ 921   1          EA = 1;             // 开启总中断
+ 922   1          ES = 1;             // 开启串口中断
+ 923   1      }
+ 924          
+ 925          /**
+ 926           * @brief 发送一个字节
+ 927           * @param dat 要发送的数据
+ 928           */
+ 929          void UART_SendByte(unsigned char dat) {
+ 930   1          SBUF = dat;         // 数据写入发送缓冲区
+ 931   1          while (!TI);        // 等待发送完成
+ 932   1          TI = 0;             // 清除发送中断标志
+ 933   1      }
+ 934          /**
+ 935           * @brief 发送字符串
+ 936           * @param str 要发送的字符串（以'\0'结尾）
+ 937           */
+ 938          
+ 939          void UART_SendString(char *str) {
+ 940   1          while (*str) {
+ 941   2              UART_SendByte(*str++);
+ 942   2          }
+ 943   1      }
+ 944          /**
+ 945           * @brief 串口中断服务函数  接收函数
+ 946           */
+ 947          void UART_ISR() interrupt 4 {
+ 948   1          if (RI) {                       // 接收中断
+ 949   2              RI = 0;                     // 清除接收标志
+ 950   2              rx_buf[0] = SBUF;  // 存储接收到的数据
+ 951   2                      
+ 952   2              // 将串口输入字符作为对应数值
+ 953   2                      if(rx_buf[0]=='1')input_code=0x01;
+ 954   2                      else if(rx_buf[0]=='2')input_code=0x02;
+ 955   2                      else if(rx_buf[0]=='3')input_code=0x03;
+ 956   2                      else if(rx_buf[0]=='4')input_code=0x04;
+ 957   2                      else if(rx_buf[0]=='5')input_code=0x05;
+ 958   2                      else if(rx_buf[0]=='6')input_code=0x06;
+ 959   2                      else if(rx_buf[0]=='7')input_code=0x07;
+ 960   2                      else if(rx_buf[0]=='8')input_code=0x08;
+ 961   2                      else if(rx_buf[0]=='9')input_code=0x09;
+ 962   2                      else if(rx_buf[0]=='a')input_code=0x0E;
+ 963   2                      else if(rx_buf[0]=='g')input_code=0x0F;
+ 964   2                      else if(rx_buf[0]=='b')input_code=0x10;
+ 965   2                      else if(rx_buf[0]=='q')input_code=0x11;
+ 966   2          }
+ 967   1              
+ 968   1      }
+ 969          /*************IIc的实现**********************/
+ 970          /************************************************************************************/
+ 971          
+ 972          
+ 973          void iic_start(void)
+ 974          {
+ 975   1              IIC_SDA=1;//如果把该条语句放在SCL后面，第二次读写会出现问
+ 976   1              delay_10us(1);
+ 977   1              IIC_SCL=1;
+ 978   1              delay_10us(1);
+ 979   1              IIC_SDA=0;      //当SCL为高电平时，SDA由高变为
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 17  
+
+ 980   1              delay_10us(1);
+ 981   1              IIC_SCL=0;//钳住I2C总线，准备发送或接收数据
+ 982   1              delay_10us(1);
+ 983   1      }
+ 984          /*******************************************************************************
+ 985          *         : iic_stop
+ 986          * 函数功能                 : 产生IIC停止信号   
+ 987          *            : 
+ 988          *            : 
+ 989          *******************************************************************************/
+ 990          void iic_stop(void)
+ 991          {       
+ 992   1              IIC_SDA=0;//如果把该条语句放在SCL后面，第二次读写会出现问
+ 993   1              delay_10us(1);
+ 994   1              IIC_SCL=1;
+ 995   1              delay_10us(1);
+ 996   1              IIC_SDA=1;      //当SCL为高电平时，SDA由低变为
+ 997   1              delay_10us(1);                  
+ 998   1      }
+ 999          /*******************************************************************************
+1000          *         : iic_ack
+1001          * 函数功能                 : 产生ACK应答  
+1002          *            : 
+1003          *            : 
+1004          *******************************************************************************/
+1005          void iic_ack(void)
+1006          {
+1007   1              IIC_SCL=0;
+1008   1              IIC_SDA=0;      //SDA为低电平
+1009   1              delay_10us(1);
+1010   1              IIC_SCL=1;
+1011   1              delay_10us(1);
+1012   1              IIC_SCL=0;
+1013   1      }
+1014          /*******************************************************************************
+1015          *         : iic_nack
+1016          * 函数功能                 : 产生NACK非应 
+1017          *            : 
+1018          *            : 
+1019          *******************************************************************************/
+1020          void iic_nack(void)
+1021          {
+1022   1              IIC_SCL=0;
+1023   1              IIC_SDA=1;      //SDA为高电平
+1024   1              delay_10us(1);
+1025   1              IIC_SCL=1;
+1026   1              delay_10us(1);
+1027   1              IIC_SCL=0;      
+1028   1      }
+1029          /*******************************************************************************
+1030          *         : iic_wait_ack
+1031          * 函数功能                 : 等待应答信号到来   
+1032          *            : 
+1033          *            : 1，接收应答失
+1034                                           0，接收应答成
+1035          *******************************************************************************/
+1036          uchar iic_wait_ack(void)
+1037          {
+1038   1              uchar time_temp=0;
+1039   1              
+1040   1              IIC_SCL=1;
+1041   1              delay_10us(1);
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 18  
+
+1042   1              while(IIC_SDA)  //等待SDA为低电平
+1043   1              {
+1044   2                      time_temp++;
+1045   2                      if(time_temp>100)//超时则强制结束IIC通信
+1046   2                      {       
+1047   3                              iic_stop();
+1048   3                              return 1;       
+1049   3                      }                       
+1050   2              }
+1051   1              IIC_SCL=0;
+1052   1              return 0;       
+1053   1      }
+1054          /*******************************************************************************
+1055          *         : iic_write_byte
+1056          * 函数功能                 : IIC发一个字
+1057          *            : dat：发送一个字
+1058          *            : 
+1059          *******************************************************************************/
+1060          void iic_write_byte(uchar dat)
+1061          {                        
+1062   1          uchar i=0; 
+1063   1                          
+1064   1          IIC_SCL=0;
+1065   1          for(i=0;i<8;i++)    //循环8次将个字节传出，先传高再传低
+1066   1          {              
+1067   2              if((dat&0x80)>0) 
+1068   2                              IIC_SDA=1;
+1069   2                      else
+1070   2                              IIC_SDA=0;
+1071   2              dat<<=1;          
+1072   2                      delay_10us(1);  
+1073   2                      IIC_SCL=1;
+1074   2                      delay_10us(1); 
+1075   2                      IIC_SCL=0;      
+1076   2                      delay_10us(1);
+1077   2          }    
+1078   1      }
+1079          /*******************************************************************************
+1080          *         : iic_read_byte
+1081          * 函数功能                 : IIC读一个字
+1082          *            : ack=1时，发ACK，ack=0，发送nACK 
+1083          *            : 应答或非应答
+1084          *******************************************************************************/
+1085          uchar iic_read_byte(uchar ack)
+1086          {
+1087   1              uchar i=0,receive=0;
+1088   1              
+1089   1          for(i=0;i<8;i++ )   //循环8次将个字节读出，先读高再传低
+1090   1              {
+1091   2              IIC_SCL=0; 
+1092   2              delay_10us(1);
+1093   2                      IIC_SCL=1;
+1094   2              receive<<=1;
+1095   2              if(IIC_SDA)receive++;   
+1096   2                      delay_10us(1); 
+1097   2          }                                    
+1098   1          if (!ack)
+1099   1              iic_nack();
+1100   1          else
+1101   1              iic_ack();  
+1102   1                        
+1103   1          return receive;
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 19  
+
+1104   1      }
+1105          
+1106          void ZLG7290_SetLED(uchar digit, uchar value)  
+1107          {
+1108   1          //zlg7290_write_one_byte(0x10 + digit, value); 
+1109   1               IIC_Write(ZLG7290_addr, 0X10+digit,value);
+1110   1              // IIC_Read(ZLG7290_addr,0x01);
+1111   1      }
+1112          uchar ZLG7290_ReadKey()
+1113          {
+1114   1          //return zlg7290_read_one_byte(0x01); 
+1115   1              return IIC_Read(ZLG7290_addr,0x01);
+1116   1      }
+1117          
+1118          /*****************************优化后的IIC 写函数  ************/
+1119          // 多个相似的I2C读写函数可以合并
+1120          
+1121          void IIC_Write(uchar dev_addr, uchar write_addr, uchar dat) {
+1122   1          iic_start();
+1123   1          iic_write_byte(dev_addr);
+1124   1          iic_wait_ack();
+1125   1          iic_write_byte(write_addr);
+1126   1          iic_wait_ack();
+1127   1          iic_write_byte(dat);
+1128   1          iic_wait_ack();
+1129   1          iic_stop();
+1130   1          DelayMs(10);
+1131   1      }
+1132          uchar IIC_Read(uchar dev_addr,uchar read_addr)
+1133          {                                 
+1134   1              uchar temp=0;                                                                                                                                                    
+1135   1          iic_start();        
+1136   1              iic_write_byte(dev_addr);          //发写命令
+1137   1              iic_wait_ack(); 
+1138   1          iic_write_byte(read_addr);  //发写地址  
+1139   1              iic_wait_ack();     
+1140   1              iic_start();                     
+1141   1              iic_write_byte(dev_addr+1);                     //进入接收模式     
+1142   1              iic_wait_ack();  
+1143   1          temp=iic_read_byte(0);      //读取字节                 
+1144   1          iic_stop();                         //产生个停止条   
+1145   1              return temp;                    //返回读取的数
+1146   1      }
+1147          /*********************中断T0读取按键**********************/
+1148          // 初始化中断
+1149          void INT0_Init() {
+1150   1          IT0 = 1;    // 下降沿触发
+1151   1          EX0 = 1;    // 使能INT0中断
+1152   1          EA = 1;     // 开启总中断
+1153   1      }
+1154          
+1155          
+1156          // 中断服务函数
+1157          void INT0_ISR() interrupt 0 {
+1158   1           key_code1 = ZLG7290_ReadKey(); // 读取键值寄存器
+1159   1      }
+1160          //将整形数转为对应的字符，由于串口发送
+1161          uchar int_to_char(uint16_t dat)
+1162          {
+1163   1              if(dat==0) return '0';else if(dat==1) return '1';else if(dat==2) return '2';
+1164   1              else if(dat==3) return '3';else if(dat==4) return '4';else if(dat==5) return '5';
+1165   1              else if(dat==6) return '6';else if(dat==7) return '7';else if(dat==8) return '8';
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 20  
+
+1166   1              else if(dat==9) return '9';
+1167   1              return 0;
+1168   1      }
+1169          
+1170          //
+1171          void smg_anjian()
+1172          {   if(key_code1<=8){ZLG7290_SetLED(key_code1-1,codevalue[(key_code1-1)]);}
+1173   1              else if(key_code1>8 && key_code1<17){key_code1=(key_code1-8);ZLG7290_SetLED(key_code1,codevalue[(8-key_co
+             -de1)]);key_code1=0;}
+1174   1      }
+1175          
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 21  
+
+NAME                                    CLASS   MSPACE  TYPE    OFFSET  SIZE
+====                                    =====   ======  ====    ======  ====
+
+
+result_display . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+test_B2_TLC549 . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  adc_value. . . . . . . . . . . . . .  AUTO     DATA   U_CHAR   0000H  1
+P1 . . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   0090H  1
+P3 . . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   00B0H  1
+EA . . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      00AFH  1
+rx_buf . . . . . . . . . . . . . . . .  PUBLIC   DATA   ARRAY    0000H  4
+UART_ISR . . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+test_single_IO_module. . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+ds18b20_reset. . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+IE . . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   00A8H  1
+IIC_SDA. . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0090H  1
+test_B3_DAC0832. . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+test_8led. . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+_int_to_char . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  dat. . . . . . . . . . . . . . . . .  * REG *  DATA   U_INT    0004H  2
+test_AD_module . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+INT0_Init. . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+test_Multi_IO_module . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+test_B4_ADC0809. . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  getdata. . . . . . . . . . . . . . .  AUTO     DATA   U_INT    0000H  2
+  i. . . . . . . . . . . . . . . . . .  AUTO     DATA   U_INT    0002H  2
+HC165_SH_LD. . . . . . . . . . . . . .  ABSBIT   -----  BIT      0092H  1
+CS . . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0094H  1
+ES . . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      00ACH  1
+ds18b20_start. . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+INT0_flag. . . . . . . . . . . . . . .  PUBLIC   DATA   BIT      0000H  1
+IIC_SCL. . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0091H  1
+IP . . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   00B8H  1
+DATA . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0093H  1
+RI . . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0098H  1
+ds18b20_read_byte. . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0003H  1
+  dat. . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0002H  1
+  temp . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0001H  1
+TI . . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0099H  1
+smg_anjian . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+ds18b20_init . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+HC165_ReadByte . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0006H  1
+  dat. . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0007H  1
+test_8Kaiguan. . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0007H  1
+test_B1_ISD1420. . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+HC164_DATA . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0095H  1
+HC165_DATA . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0094H  1
+_TLC5615_Write . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  data1. . . . . . . . . . . . . . . .  * REG *  DATA   U_INT    0004H  2
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0003H  1
+_ZLG7290_SetLED. . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  digit. . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0007H  1
+  value. . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0003H  1
+_UART_SendString . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  str. . . . . . . . . . . . . . . . .  AUTO     DATA   PTR      0000H  3
+main . . . . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+test_D3_24c02. . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+ds18b20_read_bit . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 22  
+
+NAME                                    CLASS   MSPACE  TYPE    OFFSET  SIZE
+====                                    =====   ======  ====    ======  ====
+
+
+  dat. . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0005H  1
+test_F8_DS18B20. . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  value_temp . . . . . . . . . . . . .  AUTO     DATA   U_INT    0000H  2
+test_Buzzer. . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+_HC164_SendByte. . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  dat. . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0007H  1
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0006H  1
+_ds18b20_write_byte. . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  dat. . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0005H  1
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0003H  1
+  temp . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0002H  1
+SCLK . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0093H  1
+test_8Anjian . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0007H  1
+input_code . . . . . . . . . . . . . .  PUBLIC   DATA   U_CHAR   0004H  1
+SBUF . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   0099H  1
+_DelayMs . . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   INT      0006H  2
+  ii . . . . . . . . . . . . . . . . .  AUTO     DATA   U_CHAR   0000H  1
+  j. . . . . . . . . . . . . . . . . .  AUTO     DATA   U_CHAR   0001H  1
+_IIC_Read. . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  dev_addr . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0002H  1
+  read_addr. . . . . . . . . . . . . .  AUTO     DATA   U_CHAR   0000H  1
+  temp . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0001H  1
+UART_Init. . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+SCON . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   0098H  1
+TMOD . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   0089H  1
+TCON . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   0088H  1
+iic_nack . . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+eoc. . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0092H  1
+ds18b20_read_temperture. . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  temp . . . . . . . . . . . . . . . .  AUTO     DATA   FLOAT    0000H  4
+  dath . . . . . . . . . . . . . . . .  AUTO     DATA   U_CHAR   0004H  1
+  datl . . . . . . . . . . . . . . . .  AUTO     DATA   U_CHAR   0005H  1
+  value. . . . . . . . . . . . . . . .  AUTO     DATA   U_INT    0006H  2
+clk. . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0093H  1
+_delay_10us. . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  ten_us . . . . . . . . . . . . . . .  * REG *  DATA   INT      0006H  2
+codevalue. . . . . . . . . . . . . . .  PUBLIC   DATA   ARRAY    0005H  10
+test_138 . . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+A. . . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0092H  1
+test_smgAnjian . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+_UART_SendByte . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  dat. . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0007H  1
+result_buf . . . . . . . . . . . . . .  PUBLIC   DATA   ARRAY    000FH  22
+C. . . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0094H  1
+test_relay . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+D. . . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0095H  1
+test_iic_module. . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+_IIC_Write . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  dev_addr . . . . . . . . . . . . . .  AUTO     DATA   U_CHAR   0000H  1
+  write_addr . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0002H  1
+  dat. . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0001H  1
+iic_ack. . . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+iic_start. . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+ET0. . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      00A9H  1
+ZLG7290_ReadKey. . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 23  
+
+NAME                                    CLASS   MSPACE  TYPE    OFFSET  SIZE
+====                                    =====   ======  ====    ======  ====
+
+
+test_D1_stepMotor. . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+_iic_read_byte . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  ack. . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0005H  1
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0003H  1
+  receive. . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0002H  1
+TH0. . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   008CH  1
+DS18B20_PORT . . . . . . . . . . . . .  ABSBIT   -----  BIT      0092H  1
+EX0. . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      00A8H  1
+IT0. . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0088H  1
+TH1. . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   008DH  1
+show_home_page . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+TL0. . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   008AH  1
+one_input_class. . . . . . . . . . . .  ABSBIT   -----  BIT      0097H  1
+TL1. . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   008BH  1
+test_hc244_hc273 . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0007H  1
+test_D3_PCF. . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  i. . . . . . . . . . . . . . . . . .  AUTO     DATA   U_CHAR   0000H  1
+TR0. . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      008CH  1
+test_motor . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+TR1. . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      008EH  1
+CLK. . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0092H  1
+REC. . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0092H  1
+DIN. . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0092H  1
+_iic_write_byte. . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  dat. . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0005H  1
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0003H  1
+iic_wait_ack . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  time_temp. . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0005H  1
+iic_stop . . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+test_8255_module . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+HC164_CLK. . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0096H  1
+HC165_CLK. . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0093H  1
+rx_flag. . . . . . . . . . . . . . . .  PUBLIC   DATA   BIT      0001H  1
+T2CON. . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   00C8H  1
+ds18b20_check. . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  time_temp. . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0005H  1
+INT0_ISR . . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+test_chuanbin. . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  data8. . . . . . . . . . . . . . . .  AUTO     DATA   U_CHAR   0000H  1
+B1 . . . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0093H  1
+rx_count . . . . . . . . . . . . . . .  PUBLIC   DATA   U_CHAR   0025H  1
+test_C2_TLC561 . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+key_code1. . . . . . . . . . . . . . .  PUBLIC   DATA   U_CHAR   0026H  1
+PSW. . . . . . . . . . . . . . . . . .  SFR      DATA   U_CHAR   00D0H  1
+test_A2_16_16LED . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+T0x. . . . . . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+TLC549_ReadByte. . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+  i. . . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0006H  1
+  dat. . . . . . . . . . . . . . . . .  * REG *  DATA   U_CHAR   0007H  1
+PLAYE. . . . . . . . . . . . . . . . .  ABSBIT   -----  BIT      0093H  1
+TLC549_Init. . . . . . . . . . . . . .  PUBLIC   CODE   PROC     0000H  -----
+
+
+MODULE INFORMATION:   STATIC OVERLAYABLE
+   CODE SIZE        =   4529    ----
+   CONSTANT SIZE    =   2552    ----
+   XDATA SIZE       =   ----    ----
+C51 COMPILER V9.54   TEST_ROUTINE                                                          05/27/2025 14:42:26 PAGE 24  
+
+   PDATA SIZE       =   ----    ----
+   DATA SIZE        =     39      24
+   IDATA SIZE       =   ----    ----
+   BIT SIZE         =      2    ----
+END OF MODULE INFORMATION.
+
+
+C51 COMPILATION COMPLETE.  0 WARNING(S),  0 ERROR(S)
